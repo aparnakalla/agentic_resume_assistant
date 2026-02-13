@@ -1,4 +1,3 @@
-# docx_ops/replace_project.py
 from __future__ import annotations
 from typing import List
 from docx import Document
@@ -17,8 +16,8 @@ def replace_first_project_safely(doc: Document, new_title: str, new_bullets: Lis
         run.bold = True
         run.font.size = Pt(12)
         paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-        paragraph.paragraph_format.space_after = Pt(0)
-        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(2)
+        paragraph.paragraph_format.space_before = Pt(6)
 
     def format_bullet(paragraph, text):
         run = paragraph.add_run(f"• {text}")
@@ -26,93 +25,93 @@ def replace_first_project_safely(doc: Document, new_title: str, new_bullets: Lis
         paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
         paragraph.paragraph_format.left_indent = Inches(0.25)
         paragraph.paragraph_format.first_line_indent = Inches(-0.15)
-        paragraph.paragraph_format.space_after = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(1)
         paragraph.paragraph_format.space_before = Pt(0)
 
     def is_section_header(text: str) -> bool:
-        t = (text or "").strip()
-        # e.g., "WORK EXPERIENCE", "EDUCATION"
-        return len(t) >= 4 and t.upper() == t and any(c.isalpha() for c in t)
+        t = text.strip()
+        return t.isupper() and len(t) > 5
 
-    def is_bullet_line(text: str) -> bool:
-        t = (text or "").strip()
-        return t.startswith("•") or t.startswith("-")
+    def is_bullet(text: str) -> bool:
+        return text.strip().startswith("•")
 
-    def is_title_like(paragraph) -> bool:
-        # Common case: title is bolded somewhere in the paragraph
-        if any(run.bold for run in paragraph.runs if run.text.strip()):
+    def is_title_like(para) -> bool:
+        # Bold OR looks like "Project – Description | Dates"
+        if any(run.bold for run in para.runs if run.text.strip()):
             return True
-        # Backup heuristic: title lines often contain a date separator like "|" or "—"
-        t = (paragraph.text or "").strip()
-        if "|" in t or "–" in t or "-" in t:
-            # avoid treating bullet lines as titles
-            return not is_bullet_line(t)
-        return False
+        t = para.text.strip()
+        return (
+            " – " in t
+            or " - " in t
+            or "|" in t
+        )
 
-    new_bullets = [bp.strip() for bp in new_bullets if bp and bp.strip()]
-
-    # 1) Find PROJECT EXPERIENCE header
-    section_found = False
-    header_idx = -1
+    # -----------------------------
+    # 1. Find PROJECT EXPERIENCE
+    # -----------------------------
+    header_idx = None
     for i, para in enumerate(doc.paragraphs):
-        if "PROJECT EXPERIENCE" in (para.text or "").upper():
-            section_found = True
+        if "PROJECT EXPERIENCE" in para.text.upper():
             header_idx = i
             break
 
-    if not section_found:
-        raise ValueError("Could not find 'PROJECT EXPERIENCE' section in the document.")
+    if header_idx is None:
+        raise ValueError("PROJECT EXPERIENCE section not found")
 
-    # 2) Find first non-empty paragraph after header => start of first project block
-    start_idx = -1
-    for i in range(header_idx + 1, len(doc.paragraphs)):
-        if doc.paragraphs[i].text.strip():
-            start_idx = i
+    # -----------------------------
+    # 2. Identify start of summary bullets
+    # -----------------------------
+    i = header_idx + 1
+    while i < len(doc.paragraphs) and not doc.paragraphs[i].text.strip():
+        i += 1
+
+    summary_start = i if i < len(doc.paragraphs) and is_bullet(doc.paragraphs[i].text) else None
+
+    # -----------------------------
+    # 3. Find first actual project title
+    # -----------------------------
+    first_title_idx = None
+    for j in range(i, len(doc.paragraphs)):
+        if is_title_like(doc.paragraphs[j]):
+            first_title_idx = j
             break
 
-    if start_idx == -1:
-        raise ValueError("Found 'PROJECT EXPERIENCE' but couldn't locate the first project entry below it.")
+    if first_title_idx is None:
+        raise ValueError("Could not locate first project title")
 
-    # 3) Find end of first project block using robust heuristics
-    end_idx = len(doc.paragraphs)  # default fallback
-    seen_bullet = False
-
-    for i in range(start_idx + 1, len(doc.paragraphs)):
-        txt = doc.paragraphs[i].text.strip()
-
+    # -----------------------------
+    # 4. Find end of first project block
+    # -----------------------------
+    end_idx = len(doc.paragraphs)
+    for k in range(first_title_idx + 1, len(doc.paragraphs)):
+        txt = doc.paragraphs[k].text.strip()
         if not txt:
-            # blank line after we've seen bullets => likely end of block
-            if seen_bullet:
-                end_idx = i
-                break
             continue
-
         if is_section_header(txt):
-            end_idx = i
+            end_idx = k
+            break
+        if is_title_like(doc.paragraphs[k]):
+            end_idx = k
             break
 
-        if is_bullet_line(txt):
-            seen_bullet = True
-            continue
+    # -----------------------------
+    # 5. Delete summary + first project
+    # -----------------------------
+    delete_start = summary_start if summary_start is not None else first_title_idx
 
-        # A new "title-like" line after we've started (and especially after bullets) => next project
-        if is_title_like(doc.paragraphs[i]) and (seen_bullet or i == start_idx + 1):
-            end_idx = i
-            break
-
-    # 4) Delete old block
-    for idx in reversed(range(start_idx, end_idx)):
+    for idx in reversed(range(delete_start, end_idx)):
         delete_paragraph(doc.paragraphs[idx])
 
-    # 5) Insert new block at start_idx
-    insert_anchor = doc.paragraphs[start_idx] if start_idx < len(doc.paragraphs) else doc.paragraphs[-1]
+    anchor = doc.paragraphs[delete_start]
 
-    # Insert title then bullets (in reverse using insert_paragraph_before)
+    # -----------------------------
+    # 6. Insert new project cleanly
+    # -----------------------------
     for bullet in reversed(new_bullets):
-        p = insert_anchor.insert_paragraph_before("")
+        p = anchor.insert_paragraph_before("")
         format_bullet(p, bullet)
 
-    p_title = insert_anchor.insert_paragraph_before("")
-    format_title(p_title, new_title)
+    title_p = anchor.insert_paragraph_before("")
+    format_title(title_p, new_title)
 
     return doc
