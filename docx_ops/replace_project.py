@@ -14,7 +14,7 @@ def replace_first_project_safely(doc: Document, new_title: str, new_bullets: Lis
     def format_title(paragraph, text):
         run = paragraph.add_run(text)
         run.bold = True
-        run.font.size = Pt(12)
+        run.font.size = Pt(11)
         paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
         paragraph.paragraph_format.space_after = Pt(0)
         paragraph.paragraph_format.space_before = Pt(0)
