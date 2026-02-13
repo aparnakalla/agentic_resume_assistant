@@ -1,9 +1,9 @@
+# docx_ops/replace_project.py
 from __future__ import annotations
 from typing import List
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-
 
 def replace_first_project_safely(doc: Document, new_title: str, new_bullets: List[str]) -> Document:
     def delete_paragraph(paragraph):
@@ -16,8 +16,8 @@ def replace_first_project_safely(doc: Document, new_title: str, new_bullets: Lis
         run.bold = True
         run.font.size = Pt(12)
         paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-        paragraph.paragraph_format.space_after = Pt(2)
-        paragraph.paragraph_format.space_before = Pt(6)
+        paragraph.paragraph_format.space_after = Pt(0)
+        paragraph.paragraph_format.space_before = Pt(0)
 
     def format_bullet(paragraph, text):
         run = paragraph.add_run(f"• {text}")
@@ -25,93 +25,52 @@ def replace_first_project_safely(doc: Document, new_title: str, new_bullets: Lis
         paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
         paragraph.paragraph_format.left_indent = Inches(0.25)
         paragraph.paragraph_format.first_line_indent = Inches(-0.15)
-        paragraph.paragraph_format.space_after = Pt(1)
+        paragraph.paragraph_format.space_after = Pt(0)
         paragraph.paragraph_format.space_before = Pt(0)
 
-    def is_section_header(text: str) -> bool:
-        t = text.strip()
-        return t.isupper() and len(t) > 5
+    new_bullets = [bp.strip() for bp in new_bullets if bp and bp.strip()]
 
-    def is_bullet(text: str) -> bool:
-        return text.strip().startswith("•")
+    section_found = False
+    start_idx = -1
+    end_idx = -1
 
-    def is_title_like(para) -> bool:
-        # Bold OR looks like "Project – Description | Dates"
-        if any(run.bold for run in para.runs if run.text.strip()):
-            return True
-        t = para.text.strip()
-        return (
-            " – " in t
-            or " - " in t
-            or "|" in t
-        )
-
-    # -----------------------------
-    # 1. Find PROJECT EXPERIENCE
-    # -----------------------------
-    header_idx = None
     for i, para in enumerate(doc.paragraphs):
         if "PROJECT EXPERIENCE" in para.text.upper():
-            header_idx = i
-            break
-
-    if header_idx is None:
-        raise ValueError("PROJECT EXPERIENCE section not found")
-
-    # -----------------------------
-    # 2. Identify start of summary bullets
-    # -----------------------------
-    i = header_idx + 1
-    while i < len(doc.paragraphs) and not doc.paragraphs[i].text.strip():
-        i += 1
-
-    summary_start = i if i < len(doc.paragraphs) and is_bullet(doc.paragraphs[i].text) else None
-
-    # -----------------------------
-    # 3. Find first actual project title
-    # -----------------------------
-    first_title_idx = None
-    for j in range(i, len(doc.paragraphs)):
-        if is_title_like(doc.paragraphs[j]):
-            first_title_idx = j
-            break
-
-    if first_title_idx is None:
-        raise ValueError("Could not locate first project title")
-
-    # -----------------------------
-    # 4. Find end of first project block
-    # -----------------------------
-    end_idx = len(doc.paragraphs)
-    for k in range(first_title_idx + 1, len(doc.paragraphs)):
-        txt = doc.paragraphs[k].text.strip()
-        if not txt:
+            section_found = True
             continue
-        if is_section_header(txt):
-            end_idx = k
-            break
-        if is_title_like(doc.paragraphs[k]):
-            end_idx = k
-            break
 
-    # -----------------------------
-    # 5. Delete summary + first project
-    # -----------------------------
-    delete_start = summary_start if summary_start is not None else first_title_idx
+        if section_found and start_idx == -1 and para.text.strip():
+            start_idx = i
+            continue
 
-    for idx in reversed(range(delete_start, end_idx)):
+        if section_found and start_idx != -1:
+            if para.runs and para.runs[0].bold:
+                end_idx = i
+                break
+
+    if not section_found:
+        raise ValueError("Could not find 'PROJECT EXPERIENCE' section in the document.")
+    if start_idx == -1:
+        raise ValueError("Found 'PROJECT EXPERIENCE' but couldn't locate the first project entry below it.")
+
+    if end_idx == -1:
+        for j in range(start_idx + 1, len(doc.paragraphs)):
+            if doc.paragraphs[j].text.strip() == "":
+                end_idx = j
+                break
+        else:
+            end_idx = len(doc.paragraphs)
+
+    for idx in reversed(range(start_idx, end_idx)):
         delete_paragraph(doc.paragraphs[idx])
 
-    anchor = doc.paragraphs[delete_start]
+    insert_idx = start_idx
 
-    # -----------------------------
-    # 6. Insert new project cleanly
-    # -----------------------------
     for bullet in reversed(new_bullets):
-        p = anchor.insert_paragraph_before("")
-        format_bullet(p, bullet)
+        bullet_para = doc.paragraphs[insert_idx].insert_paragraph_before("")
+        format_bullet(bullet_para, bullet)
 
-    title_p = anchor.insert_paragraph_before("")
-    format_title(title_p, new_title)
+    title_para = doc.paragraphs[insert_idx].insert_paragraph_before("")
+    format_title(title_para, new_title)
 
     return doc
