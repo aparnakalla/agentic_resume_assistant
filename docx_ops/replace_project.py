@@ -32,6 +32,7 @@ def replace_first_project_safely(doc: Document, new_title: str, new_bullets: Lis
 
     section_found = False
     start_idx = -1
+    first_project_idx = -1
     end_idx = -1
 
     for i, para in enumerate(doc.paragraphs):
@@ -43,7 +44,12 @@ def replace_first_project_safely(doc: Document, new_title: str, new_bullets: Lis
             start_idx = i
             continue
 
-        if section_found and start_idx != -1:
+        if section_found and start_idx != -1 and first_project_idx == -1:
+            if para.runs and para.runs[0].bold:
+                first_project_idx = i
+                continue
+
+        if section_found and first_project_idx != -1 and i > first_project_idx:
             if para.runs and para.runs[0].bold:
                 end_idx = i
                 break
@@ -53,8 +59,11 @@ def replace_first_project_safely(doc: Document, new_title: str, new_bullets: Lis
     if start_idx == -1:
         raise ValueError("Found 'PROJECT EXPERIENCE' but couldn't locate the first project entry below it.")
 
+    if first_project_idx == -1:
+        raise ValueError("Found 'PROJECT EXPERIENCE' but couldn't locate the first project title.")
+
     if end_idx == -1:
-        for j in range(start_idx + 1, len(doc.paragraphs)):
+        for j in range(first_project_idx + 1, len(doc.paragraphs)):
             if doc.paragraphs[j].text.strip() == "":
                 end_idx = j
                 break
