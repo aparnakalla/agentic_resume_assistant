@@ -1,11 +1,7 @@
-# app.py
 import io
 import streamlit as st
 from docx import Document
 import anthropic
-
-
-# from openai import OpenAI
 
 from config import get_openai_key, get_anthropic_key, get_anthropic_model_default
 from docx_ops.replace_project import replace_first_project_safely
@@ -21,7 +17,7 @@ st.set_page_config(page_title="Agentic Resume Assistant", layout="centered")
 # =========================
 # Keys / Clients
 # =========================
-# OPENAI_KEY = get_openai_key()
+OPENAI_KEY = get_openai_key()
 ANTHROPIC_KEY = get_anthropic_key()
 
 if not OPENAI_KEY:
@@ -32,7 +28,6 @@ if not ANTHROPIC_KEY:
     st.error("Missing ANTHROPIC_API_KEY in Streamlit secrets.")
     st.stop()
 
-client_openai = OpenAI(api_key=OPENAI_KEY)
 client_claude = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
 # =========================
@@ -122,8 +117,6 @@ if st.button("✨ Update Resume & Get Feedback"):
 
     st.session_state["updated_doc_bytes"] = updated_bytes
     st.session_state["resume_text"] = extract_text_from_docx(io.BytesIO(updated_bytes))
-        
-
 
 # =========================
 # Render outputs
@@ -155,4 +148,3 @@ if st.session_state["resume_text"]:
 
     st.subheader("💬 Claude's Feedback")
     st.markdown(st.session_state["feedback"])
-
