@@ -3,7 +3,7 @@ import io
 import streamlit as st
 from docx import Document
 import anthropic
-from openai import OpenAI
+# from openai import OpenAI
 
 from config import get_openai_key, get_anthropic_key, get_anthropic_model_default
 from docx_ops.replace_project import replace_first_project_safely
@@ -19,7 +19,7 @@ st.set_page_config(page_title="Agentic Resume Assistant", layout="centered")
 # =========================
 # Keys / Clients
 # =========================
-OPENAI_KEY = get_openai_key()
+# OPENAI_KEY = get_openai_key()
 ANTHROPIC_KEY = get_anthropic_key()
 
 if not OPENAI_KEY:
@@ -95,40 +95,33 @@ if st.button("✨ Update Resume & Get Feedback"):
         st.error("Please enter a Project Title.")
         st.stop()
 
-    with st.spinner("Generating bullet points using OpenAI (structured JSON)..."):
-        bullets, assumptions, missing_qs = generate_bullet_points(
-            client_openai=client_openai,
+    doc = Document(uploaded_file)
+    resume_text_for_crew = extract_text_from_docx(io.BytesIO(uploaded_file.getvalue()))
+
+    with st.spinner("Running multi-agent crew (Bullet Writer → Resume Critic)..."):
+        bullets, assumptions, missing_qs, feedback = run_resume_crew(
             subject=subject,
             description=description,
             github_url=github_url,
+            resume_text=resume_text_for_crew,
+            claude_model=claude_model,
         )
-        st.session_state["generated_bullets"] = bullets
-        st.session_state["assumptions"] = assumptions
-        st.session_state["missing_questions"] = missing_qs
 
-    with st.spinner("Replacing the first project in your resume..."):
-        doc = Document(uploaded_file)
+    st.session_state["generated_bullets"] = bullets
+    st.session_state["assumptions"] = assumptions
+    st.session_state["missing_questions"] = missing_qs
+    st.session_state["feedback"] = feedback
+
+    with st.spinner("Replacing project in resume..."):
         updated_doc = replace_first_project_safely(doc, subject, bullets)
-
         buf = io.BytesIO()
         updated_doc.save(buf)
         updated_bytes = buf.getvalue()
 
-        resume_text = extract_text_from_docx(io.BytesIO(updated_bytes))
-
-    with st.spinner(f"Getting feedback from Claude ({claude_model})..."):
-        try:
-            feedback = get_resume_feedback_from_claude(client_claude, resume_text, claude_model)
-        except anthropic.NotFoundError:
-            st.error(
-                f"Model '{claude_model}' is not available for your API key. "
-                "Pick a different model from the dropdown (if available), or check your Anthropic plan/access."
-            )
-            st.stop()
-
     st.session_state["updated_doc_bytes"] = updated_bytes
-    st.session_state["resume_text"] = resume_text
-    st.session_state["feedback"] = feedback
+    st.session_state["resume_text"] = extract_text_from_docx(io.BytesIO(updated_bytes))
+        
+
 
 # =========================
 # Render outputs
