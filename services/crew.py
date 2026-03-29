@@ -1,10 +1,7 @@
 from __future__ import annotations
 from typing import Tuple, List
-import os
-import json
 
-from crewai import Agent, Task, Crew, Process
-from crewai.llm import LLM
+from crewai import Agent, Task, Crew, Process, LLM
 
 from config import (
     get_openai_key, get_anthropic_key,
@@ -16,9 +13,14 @@ from utils.schema import safe_load_json, validate_bullets_payload, SchemaError
 from utils.bullets import normalize_bullets
 
 
-def build_crew(subject: str, description: str, github_url: str, resume_text: str, claude_model: str):
+def run_resume_crew(
+    subject: str,
+    description: str,
+    github_url: str,
+    resume_text: str,
+    claude_model: str,
+) -> Tuple[List[str], List[str], List[str], str]:
 
-    # --- LLMs ---
     openai_llm = LLM(
         model=f"openai/{get_openai_model()}",
         api_key=get_openai_key(),
@@ -32,7 +34,6 @@ def build_crew(subject: str, description: str, github_url: str, resume_text: str
         max_tokens=ANTHROPIC_MAX_TOKENS,
     )
 
-    # --- Agent 1: Bullet Writer (OpenAI) ---
     bullet_writer = Agent(
         role="Resume Bullet Point Writer",
         goal="Generate 2-3 concise, high-impact resume bullet points for a given project",
@@ -46,7 +47,6 @@ def build_crew(subject: str, description: str, github_url: str, resume_text: str
         allow_delegation=False,
     )
 
-    # --- Agent 2: Resume Critic (Claude) ---
     resume_critic = Agent(
         role="Senior Technical Recruiter",
         goal="Evaluate a full resume and provide structured, actionable feedback",
@@ -60,8 +60,8 @@ def build_crew(subject: str, description: str, github_url: str, resume_text: str
         allow_delegation=False,
     )
 
-    # --- Task 1: Generate bullets ---
     github_line = f"GitHub (optional): {github_url}" if github_url else ""
+
     bullet_task = Task(
         description=f"""
 Generate 2-3 concise, high-impact resume bullet points for the following project.
@@ -87,7 +87,6 @@ Project Description: {description}
         agent=bullet_writer,
     )
 
-    # --- Task 2: Evaluate resume ---
     critique_task = Task(
         description=f"""
 You are reviewing a resume after the Bullet Writer has updated the first project section.
@@ -110,7 +109,6 @@ Return your response in a clear, structured format.
         context=[bullet_task],
     )
 
-    # --- Crew ---
     crew = Crew(
         agents=[bullet_writer, resume_critic],
         tasks=[bullet_task, critique_task],
@@ -118,23 +116,9 @@ Return your response in a clear, structured format.
         verbose=True,
     )
 
-    return crew
-
-
-def run_resume_crew(
-    subject: str,
-    description: str,
-    github_url: str,
-    resume_text: str,
-    claude_model: str,
-) -> Tuple[List[str], List[str], List[str], str]:
-    """
-    Returns (bullets, assumptions, missing_questions, feedback)
-    """
-    crew = build_crew(subject, description, github_url, resume_text, claude_model)
     result = crew.kickoff()
 
-    # --- Parse bullet task output ---
+    # Parse bullet task output
     bullet_raw = result.tasks_output[0].raw if result.tasks_output else ""
     try:
         payload = safe_load_json(bullet_raw)
@@ -155,7 +139,6 @@ def run_resume_crew(
             ][:MAX_BULLETS]
         bullets, assumptions, missing = fallback, [], []
 
-    # --- Parse critique task output ---
     feedback = result.tasks_output[1].raw if len(result.tasks_output) > 1 else ""
 
     return bullets, assumptions, missing, feedback
