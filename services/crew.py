@@ -1,16 +1,8 @@
 from __future__ import annotations
 from typing import Tuple, List
-import sys
-import types
 
-if 'pkg_resources' not in sys.modules:
-    _fake = types.ModuleType('pkg_resources')
-    _fake.get_distribution = lambda name: type('D', (), {'version': '0.0.0'})()
-    _fake.DistributionNotFound = Exception
-    _fake.RequirementParseError = Exception
-    sys.modules['pkg_resources'] = _fake
-
-from crewai import Agent, Task, Crew, Process, LLM
+from openai import OpenAI
+import anthropic
 
 from config import (
     get_openai_key, get_anthropic_key,
@@ -22,6 +14,79 @@ from utils.schema import safe_load_json, validate_bullets_payload, SchemaError
 from utils.bullets import normalize_bullets
 
 
+class Agent:
+    """Base agent class — defines role, goal, backstory, and LLM."""
+    def __init__(self, role: str, goal: str, backstory: str, llm: str):
+        self.role = role
+        self.goal = goal
+        self.backstory = backstory
+        self.llm = llm
+
+
+class Task:
+    """Defines what an agent should do and what output to expect."""
+    def __init__(self, description: str, expected_output: str, agent: Agent, context: list = None):
+        self.description = description
+        self.expected_output = expected_output
+        self.agent = agent
+        self.context = context or []
+
+
+class Crew:
+    """
+    Orchestrates agents and tasks sequentially.
+    Each task can receive output from previous tasks as context.
+    """
+    def __init__(self, tasks: list):
+        self.tasks = tasks
+        self.task_outputs = []
+
+    def kickoff(self) -> list:
+        self.task_outputs = []
+        for task in self.tasks:
+            context_str = ""
+            if task.context:
+                context_str = "\n\n".join(
+                    f"Output from previous agent ({t.agent.role}):\n{out}"
+                    for t, out in zip(task.context, self.task_outputs[-len(task.context):])
+                )
+            output = self._run_task(task, context_str)
+            self.task_outputs.append(output)
+        return self.task_outputs
+
+    def _run_task(self, task: Task, context_str: str) -> str:
+        full_prompt = task.description
+        if context_str:
+            full_prompt = f"{context_str}\n\n{task.description}"
+
+        if task.agent.llm == "openai":
+            client = OpenAI(api_key=get_openai_key())
+            resp = client.chat.completions.create(
+                model=get_openai_model(),
+                messages=[
+                    {"role": "system", "content": f"You are a {task.agent.role}. {task.agent.backstory}"},
+                    {"role": "user", "content": full_prompt}
+                ],
+                temperature=OPENAI_TEMPERATURE,
+            )
+            return (resp.choices[0].message.content or "").strip()
+
+        elif task.agent.llm == "anthropic":
+            client = anthropic.Anthropic(api_key=get_anthropic_key())
+            resp = client.messages.create(
+                model=get_anthropic_model_default(),
+                system=f"You are a {task.agent.role}. {task.agent.backstory}",
+                max_tokens=ANTHROPIC_MAX_TOKENS,
+                messages=[{"role": "user", "content": full_prompt}],
+            )
+            return "".join(
+                block.text for block in resp.content
+                if getattr(block, "type", None) == "text"
+            ).strip()
+
+        return ""
+
+
 def run_resume_crew(
     subject: str,
     description: str,
@@ -30,46 +95,31 @@ def run_resume_crew(
     claude_model: str,
 ) -> Tuple[List[str], List[str], List[str], str]:
 
-    openai_llm = LLM(
-        model=f"openai/{get_openai_model()}",
-        api_key=get_openai_key(),
-        temperature=OPENAI_TEMPERATURE,
-    )
-
-    claude_llm = LLM(
-        model=f"anthropic/{claude_model}",
-        api_key=get_anthropic_key(),
-        temperature=0.3,
-        max_tokens=ANTHROPIC_MAX_TOKENS,
-    )
-
+    # --- Define Agents ---
     bullet_writer = Agent(
         role="Resume Bullet Point Writer",
         goal="Generate 2-3 concise, high-impact resume bullet points for a given project",
         backstory=(
-            "You are an expert resume writer specializing in technical roles at top tech companies. "
-            "You write action-verb led, specific, and quantified bullet points. "
-            "You never invent metrics and always return valid JSON."
+            "Expert resume writer specializing in technical roles at top tech companies. "
+            "Writes action-verb led, specific, quantified bullets. Never invents metrics. "
+            "Always returns valid JSON."
         ),
-        llm=openai_llm,
-        verbose=True,
-        allow_delegation=False,
+        llm="openai",
     )
 
     resume_critic = Agent(
         role="Senior Technical Recruiter",
         goal="Evaluate a full resume and provide structured, actionable feedback",
         backstory=(
-            "You are a senior recruiter at top tech companies with 10+ years of experience. "
-            "You give specific, honest feedback on resume clarity, impact, and role fit. "
-            "You review the bullet points generated by the Bullet Writer as part of the updated resume."
+            "Senior recruiter at top tech companies with 10+ years experience. "
+            "Reviews updated resume including bullets generated by the Bullet Writer agent. "
+            "Gives specific, honest feedback on clarity, impact, and role fit."
         ),
-        llm=claude_llm,
-        verbose=True,
-        allow_delegation=False,
+        llm="anthropic",
     )
 
-    github_line = f"GitHub (optional): {github_url}" if github_url else ""
+    # --- Define Tasks ---
+    github_line = f"GitHub: {github_url}" if github_url else ""
 
     bullet_task = Task(
         description=f"""
@@ -78,8 +128,8 @@ Generate 2-3 concise, high-impact resume bullet points for the following project
 Rules:
 - Return ONLY valid JSON (no markdown, no extra text).
 - Bullets must be 1 line each, action-verb led, and specific.
-- Do NOT invent metrics. If a metric is missing, put it under "missing_info_questions".
-- If you must make an assumption, put it under "assumptions" (do not put it in bullets).
+- Do NOT invent metrics. If missing, put under "missing_info_questions".
+- Assumptions go under "assumptions", not in bullets.
 
 Return this exact JSON schema:
 {{
@@ -92,43 +142,33 @@ Project Title: {subject}
 Project Description: {description}
 {github_line}
 """.strip(),
-        expected_output='Valid JSON with keys: bullets (list), assumptions (list), missing_info_questions (list)',
+        expected_output="Valid JSON with keys: bullets, assumptions, missing_info_questions",
         agent=bullet_writer,
     )
 
     critique_task = Task(
         description=f"""
-You are reviewing a resume after the Bullet Writer has updated the first project section.
-
-Here is the full updated resume text:
+Here is the full resume text:
 {resume_text}
 
-The Bullet Writer just generated new bullets for the first project (their output is in context).
-Take those bullets into account in your evaluation.
-
-Give:
+Using the Bullet Writer's output as context, evaluate the resume and provide:
 1. 3-5 specific improvement suggestions
 2. Weak or vague bullet points, if any
 3. Suggestions for tailoring to roles like: data analyst, product manager, ML engineer
 
 Return your response in a clear, structured format.
 """.strip(),
-        expected_output='Structured feedback with improvement suggestions, weak bullets, and role-tailoring advice',
+        expected_output="Structured feedback with improvement suggestions, weak bullets, role-tailoring advice",
         agent=resume_critic,
         context=[bullet_task],
     )
 
-    crew = Crew(
-        agents=[bullet_writer, resume_critic],
-        tasks=[bullet_task, critique_task],
-        process=Process.sequential,
-        verbose=True,
-    )
+    # --- Run Crew ---
+    crew = Crew(tasks=[bullet_task, critique_task])
+    outputs = crew.kickoff()
 
-    result = crew.kickoff()
-
-    # Parse bullet task output
-    bullet_raw = result.tasks_output[0].raw if result.tasks_output else ""
+    # --- Parse bullet output ---
+    bullet_raw = outputs[0] if outputs else ""
     try:
         payload = safe_load_json(bullet_raw)
         bullets, assumptions, missing = validate_bullets_payload(
@@ -148,6 +188,14 @@ Return your response in a clear, structured format.
             ][:MAX_BULLETS]
         bullets, assumptions, missing = fallback, [], []
 
-    feedback = result.tasks_output[1].raw if len(result.tasks_output) > 1 else ""
+    feedback = outputs[1] if len(outputs) > 1 else ""
 
     return bullets, assumptions, missing, feedback
+```
+
+And update `requirements.txt` to:
+```
+streamlit>=1.32.0
+python-docx>=1.1.0
+openai>=1.0.0
+anthropic>=0.25.0
