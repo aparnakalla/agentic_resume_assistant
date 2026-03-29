@@ -1,4 +1,16 @@
 # app.py
+
+import sys
+import types
+
+if 'pkg_resources' not in sys.modules:
+    _fake = types.ModuleType('pkg_resources')
+    _fake.get_distribution = lambda name: type('D', (), {'version': '0.0.0'})()
+    _fake.DistributionNotFound = Exception
+    _fake.RequirementParseError = Exception
+    sys.modules['pkg_resources'] = _fake
+
+
 import io
 import streamlit as st
 from docx import Document
