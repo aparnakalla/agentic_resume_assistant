@@ -37,9 +37,10 @@ class Crew:
     Orchestrates agents and tasks sequentially.
     Each task can receive output from previous tasks as context.
     """
-    def __init__(self, tasks: list):
+    def __init__(self, tasks: list, claude_model: str = None):
         self.tasks = tasks
         self.task_outputs = []
+        self.claude_model = claude_model or get_anthropic_model_default()
 
     def kickoff(self) -> list:
         self.task_outputs = []
@@ -74,7 +75,7 @@ class Crew:
         elif task.agent.llm == "anthropic":
             client = anthropic.Anthropic(api_key=get_anthropic_key())
             resp = client.messages.create(
-                model=get_anthropic_model_default(),
+                model=self.claude_model,
                 system=f"You are a {task.agent.role}. {task.agent.backstory}",
                 max_tokens=ANTHROPIC_MAX_TOKENS,
                 messages=[{"role": "user", "content": full_prompt}],
@@ -164,7 +165,7 @@ Return your response in a clear, structured format.
     )
 
     # --- Run Crew ---
-    crew = Crew(tasks=[bullet_task, critique_task])
+    crew = Crew(tasks=[bullet_task, critique_task], claude_model=claude_model)
     outputs = crew.kickoff()
 
     # --- Parse bullet output ---
