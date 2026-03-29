@@ -1,9 +1,15 @@
-import os
-os.environ["OTEL_SDK_DISABLED"] = "true"
-os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 from __future__ import annotations
 from typing import Tuple, List
-import patches  # noqa: F401
+import sys
+import types
+
+if 'pkg_resources' not in sys.modules:
+    _fake = types.ModuleType('pkg_resources')
+    _fake.get_distribution = lambda name: type('D', (), {'version': '0.0.0'})()
+    _fake.DistributionNotFound = Exception
+    _fake.RequirementParseError = Exception
+    sys.modules['pkg_resources'] = _fake
+
 from crewai import Agent, Task, Crew, Process, LLM
 
 from config import (
