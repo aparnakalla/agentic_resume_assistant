@@ -12,7 +12,7 @@ def get_openai_model() -> str:
 
 def get_anthropic_model_default() -> str:
     # fallback if model list isn't available
-    return st.secrets.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
+    return st.secrets.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
 
 OPENAI_TEMPERATURE = 0.4
 ANTHROPIC_TEMPERATURE = 0.4
