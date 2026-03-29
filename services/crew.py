@@ -191,11 +191,4 @@ Return your response in a clear, structured format.
     feedback = outputs[1] if len(outputs) > 1 else ""
 
     return bullets, assumptions, missing, feedback
-```
 
-And update `requirements.txt` to:
-```
-streamlit>=1.32.0
-python-docx>=1.1.0
-openai>=1.0.0
-anthropic>=0.25.0
