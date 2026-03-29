@@ -6,10 +6,10 @@ import anthropic
 from openai import OpenAI
 
 from config import get_openai_key, get_anthropic_key, get_anthropic_model_default
-from services.openai_bullets import generate_bullet_points
-from services.claude_feedback import list_anthropic_models, get_resume_feedback_from_claude
 from docx_ops.replace_project import replace_first_project_safely
 from docx_ops.extract_text import extract_text_from_docx
+from services.crew import run_resume_crew
+from services.claude_feedback import list_anthropic_models
 
 # =========================
 # Page Config
