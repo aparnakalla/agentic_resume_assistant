@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List
-
+import patches  # noqa: F401
 from crewai import Agent, Task, Crew, Process, LLM
 
 from config import (
