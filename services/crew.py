@@ -1,3 +1,6 @@
+import os
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 from __future__ import annotations
 from typing import Tuple, List
 import patches  # noqa: F401
